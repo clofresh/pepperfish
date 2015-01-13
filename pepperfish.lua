@@ -1,7 +1,7 @@
 --
--- All profiler related stuff is stored in the top level table '_profiler'
+-- All profiler related stuff is stored in the top level table 'module'
 --
-_profiler = {}
+local module = {}
 
 
 --
@@ -9,8 +9,8 @@ _profiler = {}
 -- the profiler and storing state.  Note that only one profiler
 -- object can be executing at one time.
 --
-function newProfiler(variant, sampledelay)
-  if _profiler.running then
+function module.new(variant, sampledelay)
+  if module.running then
     print("Profiler already running.")
     return
   end
@@ -23,7 +23,7 @@ function newProfiler(variant, sampledelay)
   end
 
   local newprof = {}
-  for k,v in pairs(_profiler) do
+  for k,v in pairs(module) do
     newprof[k] = v
   end
   newprof.variant = variant
@@ -31,17 +31,33 @@ function newProfiler(variant, sampledelay)
   return newprof
 end
 
+--
+-- Simple wrapper to handle the hook.  You should not
+-- be calling this directly. Duplicated to reduce overhead.
+--
+local function _profiler_hook_wrapper_by_call(action)
+  if module.running == nil then
+    debug.sethook( nil )
+  end
+  module.running:_internal_profile_by_call(action)
+end
+local function _profiler_hook_wrapper_by_time(action)
+  if module.running == nil then
+    debug.sethook( nil )
+  end
+  module.running:_internal_profile_by_time(action)
+end
 
 --
 -- This function starts the profiler.  It will do nothing
 -- if this (or any other) profiler is already running.
 --
-function _profiler.start(self)
-  if _profiler.running then
+function module:start()
+  if module.running then
     return
   end
   -- Start the profiler. This begins by setting up internal profiler state
-  _profiler.running = self
+  module.running = self
   self.rawstats = {}
   self.callstack = {}
   if self.variant == "time" then
@@ -61,39 +77,20 @@ end
 -- if a profiler is not running, and nothing if it isn't
 -- the currently running profiler.
 --
-function _profiler.stop(self)
-  if _profiler.running ~= self then
+function module:stop()
+  if module.running ~= self then
     return
   end
   -- Stop the profiler.
   debug.sethook( nil )
-  _profiler.running = nil
+  module.running = nil
 end
-
-
---
--- Simple wrapper to handle the hook.  You should not
--- be calling this directly. Duplicated to reduce overhead.
---
-function _profiler_hook_wrapper_by_call(action)
-  if _profiler.running == nil then
-    debug.sethook( nil )
-  end
-  _profiler.running:_internal_profile_by_call(action)
-end
-function _profiler_hook_wrapper_by_time(action)
-  if _profiler.running == nil then
-    debug.sethook( nil )
-  end
-  _profiler.running:_internal_profile_by_time(action)
-end
-
 
 --
 -- This is the main by-function-call function of the profiler and should not
 -- be called except by the hook wrapper
 --
-function _profiler._internal_profile_by_call(self,action)
+function module:_internal_profile_by_call(action)
   -- Since we can obtain the 'function' for the item we've had call us, we
   -- can use that...
   local caller_info = debug.getinfo( 3 )
@@ -102,7 +99,7 @@ function _profiler._internal_profile_by_call(self,action)
     return
   end
 
-  --SHG_LOG("[_profiler._internal_profile] "..(caller_info.name or "<nil>"))
+  --SHG_LOG("[module._internal_profile] "..(caller_info.name or "<nil>"))
 
   -- Retrieve the most recent activation record...
   local latest_ar = nil
@@ -189,7 +186,7 @@ end
 -- This is the main by-time internal function of the profiler and should not
 -- be called except by the hook wrapper
 --
-function _profiler._internal_profile_by_time(self,action)
+function module:_internal_profile_by_time(action)
   -- we do this first so we add the minimum amount of extra time to this call
   local timetaken = os.clock() - self.lastclock
 
@@ -229,7 +226,7 @@ end
 -- This returns a (possibly empty) function record for
 -- the specified function. It is for internal profiler use.
 --
-function _profiler._get_func_rec(self,func,force,info)
+function module:_get_func_rec(func,force,info)
   -- Find the function ref for 'func' (if force and not present, create one)
   local ret = self.rawstats[func]
   if ret == nil and force ~= 1 then
@@ -257,7 +254,7 @@ end
 -- sort_by_total_time is nil or false the output is sorted by
 -- the function time minus the time in it's children.
 --
-function _profiler.report( self, outfile, sort_by_total_time )
+function module:report(outfile, sort_by_total_time )
 
   outfile:write
     [[Lua Profile output created by profiler.lua. Copyright Pepperfish 2002+
@@ -370,7 +367,7 @@ end
 -- This writes the profile to the output file object as
 -- loadable Lua source.
 --
-function _profiler.lua_report(self,outfile)
+function module:lua_report(outfile)
   -- Purpose: Write out the entire raw state in a cross-referenceable form.
   local ordering = {}
   local functonum = {}
@@ -442,7 +439,7 @@ function _profiler.lua_report(self,outfile)
 end
 
 -- Internal function to calculate a pretty name for the profile output
-function _profiler._pretty_name(self,func)
+function module:_pretty_name(func)
 
   -- Only the data collected during the actual
   -- run seems to be correct.... why?
@@ -496,21 +493,23 @@ end
 -- BUG: 2 will probably act exactly like 1 in "time" mode.
 -- If anyone cares, let me (zorba) know and it can be fixed.
 --
-function _profiler.prevent(self, func, level)
+function module:prevent(func, level)
   self.prevented_functions[func] = (level or 1)
 end
 
 
-_profiler.prevented_functions = {
-  [_profiler.start] = 2,
-  [_profiler.stop] = 2,
-  [_profiler._internal_profile_by_time] = 2,
-  [_profiler._internal_profile_by_call] = 2,
+module.prevented_functions = {
+  [module.start] = 2,
+  [module.stop] = 2,
+  [module._internal_profile_by_time] = 2,
+  [module._internal_profile_by_call] = 2,
   [_profiler_hook_wrapper_by_time] = 2,
   [_profiler_hook_wrapper_by_call] = 2,
-  [_profiler.prevent] = 2,
-  [_profiler._get_func_rec] = 2,
-  [_profiler.report] = 2,
-  [_profiler.lua_report] = 2,
-  [_profiler._pretty_name] = 2
+  [module.prevent] = 2,
+  [module._get_func_rec] = 2,
+  [module.report] = 2,
+  [module.lua_report] = 2,
+  [module._pretty_name] = 2
 }
+
+return module
